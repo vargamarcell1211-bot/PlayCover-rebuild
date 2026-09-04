@@ -19,7 +19,6 @@ jobs:
           brew install swiftlint carthage
           gem install bundler
           bundle install
-          npm install https://github.com/PlayCover/create-dmg
 
       - name: Build Carthage dependencies
         env:
@@ -48,31 +47,44 @@ jobs:
             ONLY_ACTIVE_ARCH=NO \
             build
 
-      - name: Find PlayCover.app
+      - name: Verify PlayCover.app
         run: |
-          find build -name "PlayCover.app" -type d -print
+          APP_PATH="build/Build/Products/Nightly/PlayCover.app"
 
-      - name: Create DMG
-        run: |
-          APP_PATH=$(find build -name "PlayCover.app" -type d | head -n 1)
-
-          if [ -z "$APP_PATH" ]; then
-            echo "PlayCover.app not found!"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: PlayCover.app was not found."
             exit 1
           fi
 
-          echo "Found app at: $APP_PATH"
+          echo "PlayCover.app successfully built:"
+          ls -lah "$APP_PATH"
 
-          npx create-dmg "$APP_PATH" output
+      - name: Create unsigned DMG
+        run: |
+          APP_PATH="build/Build/Products/Nightly/PlayCover.app"
+          STAGING="dmg-staging"
+          DMG="output/PlayCover_nightly_1507.dmg"
 
-          DMG=$(find output -maxdepth 1 -name "*.dmg" -type f | head -n 1)
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING"
+          mkdir -p output
 
-          if [ -z "$DMG" ]; then
-            echo "DMG was not created!"
-            exit 1
-          fi
+          echo "Copying PlayCover.app..."
+          cp -R "$APP_PATH" "$STAGING/PlayCover.app"
 
-          mv "$DMG" "output/PlayCover_nightly_1507.dmg"
+          echo "Creating Applications shortcut..."
+          ln -s /Applications "$STAGING/Applications"
+
+          echo "Creating DMG..."
+          hdiutil create \
+            -volname "PlayCover 1507" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+
+          echo "DMG created successfully:"
+          ls -lh "$DMG"
 
       - name: Upload PlayCover DMG
         uses: actions/upload-artifact@v4
