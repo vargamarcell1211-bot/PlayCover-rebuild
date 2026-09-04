@@ -23,11 +23,56 @@ jobs:
           bundle install
           npm install https://github.com/PlayCover/create-dmg
 
+      - name: Build dependencies
+        run: |
+          carthage update --use-xcframeworks
+
+      - name: Disable PlayCover Sparkle signing
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path("PlayCover.xcodeproj/project.pbxproj")
+          s = p.read_text()
+
+          start_marker = 'AAC28F222899A05B005057FB /* Codesign sparkle */ = {'
+          end_marker = '\n\t\tAAE8809C287ACA4900FBB23C /* Carthage Bootstrap */ = {'
+
+          start = s.find(start_marker)
+          end = s.find(end_marker)
+
+          if start == -1 or end == -1:
+              raise SystemExit("Could not find Codesign sparkle build phase")
+
+          replacement = '''AAC28F222899A05B005057FB /* Codesign sparkle */ = {
+              isa = PBXShellScriptBuildPhase;
+              buildActionMask = 2147483647;
+              files = (
+              );
+              inputFileListPaths = (
+              );
+              inputPaths = (
+              );
+              name = "Codesign sparkle";
+              outputFileListPaths = (
+              );
+              outputPaths = (
+              );
+              runOnlyForDeploymentPostprocessing = 0;
+              shellPath = /bin/sh;
+              shellScript = "echo Skipping Sparkle signing for local rebuild\\\\n";
+          };
+          '''
+
+          s = s[:start] + replacement + s[end:]
+
+          p.write_text(s)
+          print("Sparkle signing phase disabled.")
+          PY
+
       - name: Build PlayCover
         run: |
           mkdir -p output
-
-          carthage update --use-xcframeworks
 
           xcodebuild \
             -project PlayCover.xcodeproj \
@@ -37,13 +82,15 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="-" \
+            DEVELOPMENT_TEAM="" \
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             build
 
       - name: Find built app
         run: |
-          find build -name "PlayCover.app" -print
+          find build -name "PlayCover.app" -type d -print
 
       - name: Create DMG
         run: |
@@ -53,6 +100,8 @@ jobs:
             echo "PlayCover.app was not found!"
             exit 1
           fi
+
+          echo "Found: $APP_PATH"
 
           npx create-dmg "$APP_PATH" output
 
