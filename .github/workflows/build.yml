@@ -1,0 +1,73 @@
+name: Build PlayCover 1507
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout exact PlayCover commit
+        uses: actions/checkout@v4
+        with:
+          repository: PlayCover/PlayCover
+          ref: 9cd08d8dbb914b67b7db426e4ddf9297a3bd63be
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          brew install swiftlint
+          brew install carthage
+          gem install bundler
+          bundle install
+          npm install https://github.com/PlayCover/create-dmg
+
+      - name: Build PlayCover
+        run: |
+          mkdir -p output
+
+          carthage update --use-xcframeworks
+
+          xcodebuild \
+            -project PlayCover.xcodeproj \
+            -scheme PlayCover \
+            -configuration Nightly \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Find built app
+        run: |
+          find build -name "PlayCover.app" -print
+
+      - name: Create DMG
+        run: |
+          APP_PATH=$(find build -name "PlayCover.app" -type d | head -1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "PlayCover.app was not found!"
+            exit 1
+          fi
+
+          npx create-dmg "$APP_PATH" output
+
+          DMG=$(find output -name "*.dmg" -type f | head -1)
+
+          if [ -z "$DMG" ]; then
+            echo "DMG was not created!"
+            exit 1
+          fi
+
+          mv "$DMG" output/PlayCover_nightly_1507.dmg
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayCover_nightly_1507
+          path: output/PlayCover_nightly_1507.dmg
+          retention-days: 90
