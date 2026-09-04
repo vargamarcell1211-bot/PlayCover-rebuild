@@ -31,23 +31,33 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("PlayCover.xcodeproj/project.pbxproj")
           text = path.read_text()
 
-          old = '''set -euo pipefail
-          IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME};'''
+          pattern = r'(/\* Codesign sparkle \*/ = \{.*?shellScript = ")(.*?)(";.*?\n\s*\};)'
 
-          new = '''set -euo pipefail
-          echo "Skipping Sparkle codesign for unsigned recovery build"'''
+          match = re.search(pattern, text, re.DOTALL)
 
-          if old not in text:
-              print("Sparkle codesign pattern not found; leaving project unchanged.")
-          else:
-              text = text.replace(old, new)
-              path.write_text(text)
-              print("Sparkle codesign phase patched successfully.")
+          if not match:
+              print("ERROR: Could not find the Codesign sparkle build phase.")
+              raise SystemExit(1)
+
+          replacement_script = (
+              'set -euo pipefail\\\\n'
+              'echo "Skipping Sparkle codesign for unsigned recovery build"\\\\n'
+          )
+
+          text = text[:match.start(2)] + replacement_script + text[match.end(2):]
+
+          path.write_text(text)
+
+          print("Successfully replaced the Codesign sparkle script.")
           PY
+
+          echo "Verifying patch..."
+          grep -A15 -B3 "Codesign sparkle" PlayCover.xcodeproj/project.pbxproj || true
 
       - name: Build PlayCover
         env:
