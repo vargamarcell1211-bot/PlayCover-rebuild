@@ -1,4 +1,57 @@
+name: Build PlayCover 1507
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout PlayCover
+        uses: actions/checkout@v4
+        with:
+          repository: PlayCover/PlayCover
+          ref: 9cd08d8dbb914b67b7db426e4ddf9297a3bd63be
+
+      - name: Install dependencies
+        run: |
+          brew install swiftlint carthage
+          gem install bundler
+          bundle install
+          npm install https://github.com/PlayCover/create-dmg
+
+      - name: Build Carthage dependencies
+        env:
+          FASTLANE: "1"
+        run: |
+          carthage update --use-xcframeworks
+
+      - name: Disable Sparkle codesign phase
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path("PlayCover.xcodeproj/project.pbxproj")
+          text = path.read_text()
+
+          old = '''set -euo pipefail
+          IDENTITY=${EXPANDED_CODE_SIGN_IDENTITY_NAME};'''
+
+          new = '''set -euo pipefail
+          echo "Skipping Sparkle codesign for unsigned recovery build"'''
+
+          if old not in text:
+              print("Sparkle codesign pattern not found; leaving project unchanged.")
+          else:
+              text = text.replace(old, new)
+              path.write_text(text)
+              print("Sparkle codesign phase patched successfully.")
+          PY
+
       - name: Build PlayCover
+        env:
+          FASTLANE: "1"
         run: |
           mkdir -p output
 
@@ -15,3 +68,36 @@
             ARCHS=arm64 \
             ONLY_ACTIVE_ARCH=NO \
             build
+
+      - name: Find PlayCover.app
+        run: |
+          find build -name "PlayCover.app" -type d -print
+
+      - name: Create DMG
+        run: |
+          APP_PATH=$(find build -name "PlayCover.app" -type d | head -n 1)
+
+          if [ -z "$APP_PATH" ]; then
+            echo "PlayCover.app not found!"
+            exit 1
+          fi
+
+          echo "Found app at: $APP_PATH"
+
+          npx create-dmg "$APP_PATH" output
+
+          DMG=$(find output -maxdepth 1 -name "*.dmg" -type f | head -n 1)
+
+          if [ -z "$DMG" ]; then
+            echo "DMG was not created!"
+            exit 1
+          fi
+
+          mv "$DMG" "output/PlayCover_nightly_1507.dmg"
+
+      - name: Upload PlayCover DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: PlayCover_nightly_1507.dmg
+          path: output/PlayCover_nightly_1507.dmg
+          retention-days: 90
